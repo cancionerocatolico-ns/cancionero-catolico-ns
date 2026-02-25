@@ -1,5 +1,5 @@
-streamlit
 pandas
 Pillow
 pytesseract
 streamlit==1.31.0
+st-gsheets-connection==0.0.36
