@@ -1,19 +1,24 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import re
+import gspread
+from gspread_dataframe import set_with_dataframe
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 
-# Conexión con la librería oficial
-# IMPORTANTE: Debes tener configurado el Secret 'connections.gsheets'
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Conexión directa vía URL pública (para lectura rápida)
+SHEET_ID = "13AbeB4wcgNnXM5JMcuIgMS2Ql2qSAF_3-uJOg4duiKs"
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
 def cargar_datos():
-    return conn.read(ttl=0) # ttl=0 para leer cambios al instante
+    try:
+        # Forzamos la descarga del CSV para ver cambios inmediatos
+        return pd.read_csv(f"{CSV_URL}&cb={st.session_state.get('reboot', 0)}")
+    except:
+        return pd.DataFrame(columns=["Título", "Autor", "Categoría", "Letra"])
 
-# --- LÓGICA MUSICAL ---
+# --- LÓGICA MUSICAL (Tu motor original) ---
 NOTAS_LAT = ["Do", "Do#", "Re", "Re#", "Mi", "Fa", "Fa#", "Sol", "Sol#", "La", "La#", "Si"]
 NOTAS_AMER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -30,7 +35,9 @@ def procesar_palabra(palabra, semitonos, es_linea_acordes):
     if match:
         raiz, resto = match.group(1), match.group(2)
         if semitonos == 0: return f"<b>{palabra}</b>"
-        nueva_raiz = transportar_nota(raiz, semitonos)
+        dic_bemoles = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
+        nota_busqueda = dic_bemoles.get(raiz, raiz)
+        nueva_raiz = transportar_nota(nota_busqueda, semitonos)
         return f"<b>{nueva_raiz}{resto}</b>"
     return palabra
 
@@ -48,6 +55,7 @@ def procesar_texto_final(texto, semitonos):
     return "<br>".join(lineas)
 
 # --- INTERFAZ ---
+if 'reboot' not in st.session_state: st.session_state.reboot = 0
 df = cargar_datos()
 
 st.sidebar.title("🎸 ChordMaster Pro")
@@ -57,7 +65,7 @@ f_size = st.sidebar.slider("Tamaño Fuente", 15, 45, 22)
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap');
-    .visor-musical {{ font-family: 'Courier Prime', monospace !important; background: white; color: black; padding: 25px; border-radius: 12px; font-size: {f_size}px; border: 1px solid #ddd; }}
+    .visor-musical {{ font-family: 'Courier Prime', monospace !important; background: white; color: black; padding: 25px; border-radius: 12px; font-size: {f_size}px; line-height: 1.2; border: 1px solid #ddd; }}
     .visor-musical b {{ color: #d32f2f; }}
     </style>
     """, unsafe_allow_html=True)
@@ -72,28 +80,20 @@ if menu == "🏠 Cantar":
         st.markdown(f'<div class="visor-musical"><h2>{data["Título"]}</h2><hr>{procesar_texto_final(data["Letra"], tp)}</div>', unsafe_allow_html=True)
 
 elif menu == "➕ Agregar Canción":
-    st.header("➕ Nueva Canción a la Nube")
-    with st.form("form_nuevo"):
-        t_n = st.text_input("Título")
-        a_n = st.text_input("Autor")
-        cat_n = st.selectbox("Categoría", ["Entrada", "Comunión", "Salida", "Varios"])
-        l_n = st.text_area("Letra y Acordes (Respeta los espacios)", height=300)
-        enviar = st.form_submit_button("💾 Guardar en Google Sheets")
-        
-        if enviar:
-            if t_n and l_n:
-                # Creamos el nuevo registro
-                nueva_fila = pd.DataFrame([[t_n, a_n, cat_n, l_n]], columns=df.columns)
-                df_actualizado = pd.concat([df, nueva_fila], ignore_index=True)
-                # GUARDAR EN LA NUBE
-                conn.update(data=df_actualizado)
-                st.success("¡Canción guardada exitosamente!")
-                st.cache_data.clear()
+    st.header("➕ Nueva Canción")
+    with st.form("nuevo_tema"):
+        t = st.text_input("Título")
+        a = st.text_input("Autor")
+        l = st.text_area("Letra y Acordes (usa espacios para alinear)", height=300)
+        if st.form_submit_button("💾 Guardar en la Nube"):
+            if t and l:
+                st.warning("Para guardar, copia esta canción y pégala en tu Google Sheets. La escritura automática requiere una Service Account.")
+                st.link_button("Ir a Google Sheets", f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit")
             else:
-                st.error("Por favor completa Título y Letra.")
+                st.error("Faltan datos.")
 
 elif menu == "📂 Gestionar Base":
     st.dataframe(df)
-    if st.button("🔄 Refrescar"):
-        st.cache_data.clear()
+    if st.button("🔄 Sincronizar"):
+        st.session_state.reboot += 1
         st.rerun()
