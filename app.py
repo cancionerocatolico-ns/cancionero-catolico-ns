@@ -3,10 +3,8 @@ import pandas as pd
 import requests
 import base64
 import re
-import time
-import io
 
-# --- OPTIMIZACIÓN CRON-JOB ---
+# --- OPTIMIZACIÓN CRON-JOB (Mantener Vivo) ---
 if "user_agent" in st.context.headers:
     if "cron-job.org" in st.context.headers["user_agent"]:
         st.write("Ping recibido.")
@@ -16,94 +14,40 @@ if "user_agent" in st.context.headers:
 TOKEN = st.secrets["GITHUB_TOKEN"]
 REPO = st.secrets["GITHUB_REPO"]
 
-# --- FUNCIONES DE COMUNICACIÓN (SOLUCIÓN AL CACHE) ---
-
-def cargar_categorias_csv():
-    """Carga categorías forzando la lectura de la versión más reciente de GitHub."""
-    path = "canciones/categorias.csv"
-    # Usamos un timestamp único para engañar al cache de GitHub y Streamlit
-    t_fuerza = int(time.time())
-    url = f"https://api.github.com/repos/{REPO}/contents/{path}?t={t_fuerza}"
-    headers = {
-        "Authorization": f"token {TOKEN}",
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0"
-    }
-    
-    # Limpieza total de cache de Streamlit antes de leer
-    st.cache_data.clear()
-    
-    res = requests.get(url, headers=headers)
-    if res.status_code == 200:
-        try:
-            # Añadimos el parámetro nocache a la URL de descarga directa
-            download_url = res.json()['download_url'] + f"&nocache={t_fuerza}"
-            content = requests.get(download_url).text
-            
-            # Leemos el CSV (sep=',' para el formato que ya tienes en GitHub)
-            df_cat = pd.read_csv(io.StringIO(content), sep=',', skip_blank_lines=True)
-            
-            if 'nombre' in df_cat.columns:
-                lista = df_cat['nombre'].dropna().unique().tolist()
-                # Limpiamos cada palabra de espacios raros
-                return sorted([str(c).strip() for c in lista if str(c).strip() and "Error" not in str(c)])
-        except Exception as e:
-            pass
-            
-    # Si falla algo, devolvemos básicos para no bloquear la app
-    return ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
-
-def guardar_categorias_csv(lista_cats):
-    """Guarda el CSV con formato de comas para mantener el visor de GitHub activo."""
-    # Reconstruimos el CSV asegurando la coma final
-    csv_content = "nombre,\n" + "\n".join([f"{c}," for c in lista_cats])
-    path = "canciones/categorias.csv"
+def leer_archivo_github(path):
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     headers = {"Authorization": f"token {TOKEN}"}
-    
     res = requests.get(url, headers=headers)
-    sha = res.json().get('sha') if res.status_code == 200 else None
-    
-    content_b64 = base64.b64encode(csv_content.encode('utf-8')).decode('utf-8')
-    payload = {"message": "Update searchable categorias CSV", "content": content_b64}
-    if sha: payload["sha"] = sha
-    
-    if requests.put(url, headers=headers, json=payload).status_code in [200, 201]:
-        st.cache_data.clear()
-        time.sleep(2) # Pausa extra para que GitHub refresque sus servidores
-        return True
-    return False
+    if res.status_code == 200:
+        return requests.get(res.json()['download_url']).text
+    return None
 
 def leer_canciones_github():
-    t_fuerza = int(time.time())
-    url = f"https://api.github.com/repos/{REPO}/contents/canciones?t={t_fuerza}"
-    headers = {"Authorization": f"token {TOKEN}", "Cache-Control": "no-cache"}
+    url = f"https://api.github.com/repos/{REPO}/contents/canciones"
+    headers = {"Authorization": f"token {TOKEN}"}
     response = requests.get(url, headers=headers)
     canciones = []
-    
     if response.status_code == 200:
-        for archivo in response.json():
-            if archivo['name'].endswith('.txt') and not archivo['name'].startswith('categorias'):
-                res_file = requests.get(archivo['download_url'] + f"&t={t_fuerza}")
+        archivos = response.json()
+        for archivo in archivos:
+            if archivo['name'].endswith('.txt') and archivo['name'] != 'categorias.txt':
+                res_file = requests.get(archivo['download_url'])
                 content = res_file.text
                 lineas = content.split('\n')
-                
+                # Parseo de metadatos
                 titulo = lineas[0].replace("Título: ", "").strip() if "Título: " in lineas[0] else archivo['name']
                 autor = lineas[1].replace("Autor: ", "").strip() if len(lineas) > 1 and "Autor: " in lineas[1] else "Anónimo"
                 categoria = lineas[2].replace("Categoría: ", "").strip() if len(lineas) > 2 and "Categoría: " in lineas[2] else "Varios"
                 referencia = lineas[3].replace("Referencia: ", "").strip() if len(lineas) > 3 and "Referencia: " in lineas[3] else ""
                 letra = "\n".join(lineas[5:]) if len(lineas) > 5 else content
-                
                 canciones.append({
                     "Título": titulo, "Autor": autor, "Categoría": categoria, 
                     "Referencia": referencia, "Letra": letra, "archivo": archivo['name']
                 })
     return pd.DataFrame(canciones)
 
-def guardar_en_github(nombre_archivo, contenido):
-    if not nombre_archivo.endswith(".txt"): nombre_archivo += ".txt"
-    path = f"canciones/{nombre_archivo}"
+def guardar_en_github(nombre_archivo, contenido, es_config=False):
+    path = f"canciones/{nombre_archivo}.txt" if not es_config else f"canciones/{nombre_archivo}"
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     headers = {"Authorization": f"token {TOKEN}"}
     res = requests.get(url, headers=headers)
@@ -111,10 +55,17 @@ def guardar_en_github(nombre_archivo, contenido):
     content_b64 = base64.b64encode(contenido.encode('utf-8')).decode('utf-8')
     payload = {"message": f"Update {nombre_archivo}", "content": content_b64}
     if sha: payload["sha"] = sha
-    if requests.put(url, headers=headers, json=payload).status_code in [200, 201]:
-        st.cache_data.clear()
-        time.sleep(1)
-        return True
+    return requests.put(url, headers=headers, json=payload).status_code in [200, 201]
+
+def eliminar_de_github(nombre_archivo):
+    path = f"canciones/{nombre_archivo}"
+    url = f"https://api.github.com/repos/{REPO}/contents/{path}"
+    headers = {"Authorization": f"token {TOKEN}"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        sha = res.json().get('sha')
+        payload = {"message": f"Delete {nombre_archivo}", "sha": sha}
+        return requests.delete(url, headers=headers, json=payload).status_code == 200
     return False
 
 # --- PROCESAMIENTO MUSICAL ---
@@ -158,8 +109,9 @@ def procesar_texto_final(texto, semitonos):
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
 
-# Carga con limpieza de cache integrada
-categorias = cargar_categorias_csv()
+cat_raw = leer_archivo_github("canciones/categorias.txt")
+categorias = cat_raw.split(',') if cat_raw else ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
+
 df = leer_canciones_github()
 
 st.sidebar.title("🎸 ChordMaster")
@@ -173,9 +125,11 @@ f_size = st.sidebar.slider("Tamaño Fuente", 12, 45, 18)
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap');
-    .visor-musical {{
+    .visor-musical, textarea, .stTextArea textarea, .stTextInput input {{
         font-family: 'Courier Prime', monospace !important;
         line-height: 1.2 !important; font-size: {f_size}px !important;
+    }}
+    .visor-musical {{ 
         background-color: {c_bg} !important; color: {c_txt} !important; 
         border-radius: 12px; padding: 25px; border: 1px solid #ddd; overflow-x: auto;
     }}
@@ -190,58 +144,95 @@ if menu == "🏠 Cantar / Vivo":
     busqueda = col1.text_input("🔍 Buscar canción...")
     filtro_cat = col2.selectbox("📂 Categoría", ["Todas"] + categorias)
     df_v = df.copy()
-    if not df_v.empty:
-        if busqueda: df_v = df_v[df_v['Título'].str.contains(busqueda, case=False, na=False)]
-        if filtro_cat != "Todas": df_v = df_v[df_v['Categoría'] == filtro_cat]
+    if busqueda and not df_v.empty: df_v = df_v[df_v['Título'].str.contains(busqueda, case=False, na=False)]
+    if filtro_cat != "Todas" and not df_v.empty: df_v = df_v[df_v['Categoría'] == filtro_cat]
     
     if not df_v.empty:
-        sel_c = st.selectbox("Selecciona canción:", df_v['Título'])
+        sel_c = st.selectbox("Selecciona:", df_v['Título'])
         data = df_v[df_v['Título'] == sel_c].iloc[0]
+        
         c_at, c_tp = st.columns([1, 1])
         if c_at.button("➕ Al Setlist", use_container_width=True):
             if sel_c not in st.session_state.setlist:
                 st.session_state.setlist.append(sel_c); st.toast("Añadida")
         tp = c_tp.number_input("Transportar", -6, 6, 0)
-        if data["Referencia"]: st.link_button("🔗 Ver Referencia", data["Referencia"], use_container_width=True)
-        st.markdown(f'''<div class="visor-musical"><h2 style="margin:0; color:inherit;">{data["Título"]}</h2><p style="margin-top:0; opacity:0.7;">{data["Autor"]} | {data["Categoría"]}</p><hr style="border-color: {c_txt}; opacity:0.2;">{procesar_texto_final(data["Letra"], tp)}</div>''', unsafe_allow_html=True)
+        
+        # LINK DE ACCESO DIRECTO (Solo si existe referencia)
+        if data["Referencia"]:
+            st.link_button("🔗 Abrir Referencia", data["Referencia"], use_container_width=True)
+
+        st.markdown(f'''
+            <div class="visor-musical">
+                <h2 style="margin:0; color:inherit;">{data["Título"]}</h2>
+                <p style="margin-top:0; opacity:0.7;">{data["Autor"]} | {data["Categoría"]}</p>
+                <hr style="border-color: {c_txt}; opacity:0.2;">
+                {procesar_texto_final(data["Letra"], tp)}
+            </div>
+        ''', unsafe_allow_html=True)
 
 elif menu == "➕ Agregar Canción":
     st.header("➕ Nueva Canción")
     c1, c2 = st.columns(2)
-    t_n = c1.text_input("Título"); a_n = c2.text_input("Autor")
+    t_n = c1.text_input("Título")
+    a_n = c2.text_input("Autor")
     cat_n = st.selectbox("Categoría", categorias)
-    r_n = st.text_input("Referencia")
+    r_n = st.text_input("Referencia (Link)")
     l_n = st.text_area("Letra y Acordes:", height=350)
-    if st.button("💾 Guardar"):
+    
+    if l_n:
+        st.subheader("👀 Vista Previa")
+        st.markdown(f'<div class="visor-musical">{procesar_texto_final(l_n, 0)}</div>', unsafe_allow_html=True)
+    
+    if st.button("💾 Guardar en GitHub"):
         if t_n and l_n:
+            nombre_f = t_n.lower().replace(" ", "_")
             contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\nReferencia: {r_n}\n\n{l_n}"
-            if guardar_en_github(t_n.lower().replace(" ", "_"), contenido): st.success("¡Guardada!"); st.rerun()
+            if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
+
+elif menu == "📋 Mi Setlist":
+    st.header("📋 Mi Setlist")
+    if not st.session_state.setlist:
+        st.info("Setlist vacío.")
+    else:
+        for i, t in enumerate(st.session_state.setlist):
+            with st.expander(f"🎵 {i+1}. {t}"):
+                cancion = df[df['Título'] == t]
+                if not cancion.empty:
+                    data = cancion.iloc[0]
+                    if st.button("Quitar", key=f"del_{i}"):
+                        st.session_state.setlist.pop(i); st.rerun()
+                    if data["Referencia"]: st.link_button("Ir a Referencia", data["Referencia"])
+                    st.markdown(f'<div class="visor-musical">{procesar_texto_final(data["Letra"], 0)}</div>', unsafe_allow_html=True)
 
 elif menu == "📂 Gestionar / Editar":
     st.header("📂 Editar Biblioteca")
     for i, row in df.iterrows():
-        with st.expander(f"📝 {row['Título']}"):
-            ut = st.text_input("Título", row['Título'], key=f"e_t{i}")
-            uc = st.selectbox("Categoría", categorias, index=categorias.index(row['Categoría']) if row['Categoría'] in categorias else 0, key=f"e_c{i}")
-            ul = st.text_area("Letra", row['Letra'], height=250, key=f"e_l{i}")
-            if st.button("Actualizar", key=f"e_b{i}"):
-                nuevo_cont = f"Título: {ut}\nAutor: {row['Autor']}\nCategoría: {uc}\nReferencia: {row['Referencia']}\n\n{ul}"
-                if guardar_en_github(row['archivo'], nuevo_cont): st.success("¡OK!"); st.rerun()
+        with st.expander(f"📝 Editar: {row['Título']}"):
+            ut = st.text_input("Título", row['Título'], key=f"et_{i}")
+            ua = st.text_input("Autor", row['Autor'], key=f"ea_{i}")
+            ur = st.text_input("Referencia", row['Referencia'], key=f"er_{i}")
+            uc = st.selectbox("Categoría", categorias, index=categorias.index(row['Categoría']) if row['Categoría'] in categorias else 0, key=f"ec_{i}")
+            ul = st.text_area("Letra", row['Letra'], height=300, key=f"el_{i}")
+            if st.button("Actualizar", key=f"ub_{i}"):
+                nombre_f = row['archivo'].replace(".txt", "")
+                nuevo_cont = f"Título: {ut}\nAutor: {ua}\nCategoría: {uc}\nReferencia: {ur}\n\n{ul}"
+                if guardar_en_github(nombre_f, nuevo_cont): st.success("¡Actualizado!"); st.rerun()
+            if st.button("Borrar", key=f"db_{i}"):
+                eliminar_de_github(row['archivo']); st.rerun()
 
 elif menu == "⚙️ Categorías":
-    st.header("⚙️ Gestión Categorías")
-    nueva_c = st.text_input("Nueva categoría:")
-    if st.button("Añadir"):
-        if nueva_c and nueva_c.strip() not in categorias:
-            categorias.append(nueva_c.strip())
-            if guardar_categorias_csv(categorias): st.success("Añadida"); st.rerun()
-    st.markdown("---")
+    st.header("⚙️ Categorías")
+    nueva_cat = st.text_input("Añadir:")
+    if st.button("Guardar"):
+        if nueva_cat and nueva_cat not in categorias:
+            categorias.append(nueva_cat)
+            guardar_en_github("categorias", ",".join(categorias), es_config=True); st.rerun()
     for c in categorias:
-        col1, col2 = st.columns([3, 1])
-        col1.write(f"• {c}")
-        if col2.button("Eliminar", key=f"del_{c}"):
+        col_c, col_b = st.columns([3, 1])
+        col_c.write(f"• {c}")
+        if col_b.button("Eliminar", key=f"d_cat_{c}"):
             categorias.remove(c)
-            if guardar_categorias_csv(categorias): st.rerun()
+            guardar_en_github("categorias", ",".join(categorias), es_config=True); st.rerun()
 
 if st.sidebar.button("🔄 Refrescar Nube"):
     st.cache_data.clear(); st.rerun()
