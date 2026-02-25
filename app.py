@@ -4,7 +4,7 @@ import requests
 import base64
 import re
 
-# --- OPTIMIZACIÓN CRON-JOB (Mantener Vivo) ---
+# --- OPTIMIZACIÓN CRON-JOB ---
 if "user_agent" in st.context.headers:
     if "cron-job.org" in st.context.headers["user_agent"]:
         st.write("Ping recibido.")
@@ -14,6 +14,8 @@ if "user_agent" in st.context.headers:
 TOKEN = st.secrets["GITHUB_TOKEN"]
 REPO = st.secrets["GITHUB_REPO"]
 
+# Añadimos st.cache_data para mejorar velocidad, pero con TTL para que se refresque
+@st.cache_data(ttl=60) 
 def leer_archivo_github(path):
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     headers = {"Authorization": f"token {TOKEN}"}
@@ -30,12 +32,10 @@ def leer_canciones_github():
     if response.status_code == 200:
         archivos = response.json()
         for archivo in archivos:
-            # Solo leer archivos .txt que NO sean el de categorías
             if archivo['name'].endswith('.txt') and archivo['name'] != 'categorias.txt':
                 res_file = requests.get(archivo['download_url'])
                 content = res_file.text
                 lineas = content.split('\n')
-                # Parseo de metadatos
                 titulo = lineas[0].replace("Título: ", "").strip() if "Título: " in lineas[0] else archivo['name']
                 autor = lineas[1].replace("Autor: ", "").strip() if len(lineas) > 1 and "Autor: " in lineas[1] else "Anónimo"
                 categoria = lineas[2].replace("Categoría: ", "").strip() if len(lineas) > 2 and "Categoría: " in lineas[2] else "Varios"
@@ -48,23 +48,22 @@ def leer_canciones_github():
     return pd.DataFrame(canciones)
 
 def guardar_en_github(nombre_archivo, contenido):
-    # Forzamos que siempre tenga extensión .txt y esté en la carpeta canciones
     if not nombre_archivo.endswith(".txt"):
         nombre_archivo += ".txt"
-    
     path = f"canciones/{nombre_archivo}"
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     headers = {"Authorization": f"token {TOKEN}"}
-    
-    # Obtener el SHA si el archivo ya existe
     res = requests.get(url, headers=headers)
     sha = res.json().get('sha') if res.status_code == 200 else None
-    
     content_b64 = base64.b64encode(contenido.encode('utf-8')).decode('utf-8')
     payload = {"message": f"Update {nombre_archivo}", "content": content_b64}
     if sha: payload["sha"] = sha
     
-    return requests.put(url, headers=headers, json=payload).status_code in [200, 201]
+    result = requests.put(url, headers=headers, json=payload)
+    if result.status_code in [200, 201]:
+        st.cache_data.clear() # ¡IMPORTANTE! Limpia el cache al guardar exitosamente
+        return True
+    return False
 
 def eliminar_de_github(nombre_archivo):
     path = f"canciones/{nombre_archivo}"
@@ -74,7 +73,10 @@ def eliminar_de_github(nombre_archivo):
     if res.status_code == 200:
         sha = res.json().get('sha')
         payload = {"message": f"Delete {nombre_archivo}", "sha": sha}
-        return requests.delete(url, headers=headers, json=payload).status_code == 200
+        res_del = requests.delete(url, headers=headers, json=payload)
+        if res_del.status_code == 200:
+            st.cache_data.clear()
+            return True
     return False
 
 # --- PROCESAMIENTO MUSICAL ---
@@ -118,10 +120,10 @@ def procesar_texto_final(texto, semitonos):
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
 
-# Carga de categorías corregida
+# Carga de categorías con limpieza
 cat_raw = leer_archivo_github("canciones/categorias.txt")
 if cat_raw:
-    categorias = [c.strip() for c in cat_raw.split(',') if c.strip()]
+    categorias = sorted([c.strip() for c in cat_raw.split(',') if c.strip()])
 else:
     categorias = ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
 
@@ -199,7 +201,9 @@ elif menu == "➕ Agregar Canción":
         if t_n and l_n:
             nombre_f = t_n.lower().replace(" ", "_")
             contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\nReferencia: {r_n}\n\n{l_n}"
-            if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
+            if guardar_en_github(nombre_f, contenido): 
+                st.success("¡Guardada!")
+                st.rerun()
 
 elif menu == "📋 Mi Setlist":
     st.header("📋 Mi Setlist")
@@ -228,26 +232,31 @@ elif menu == "📂 Gestionar / Editar":
             if st.button("Actualizar", key=f"ub_{i}"):
                 nombre_f = row['archivo'].replace(".txt", "")
                 nuevo_cont = f"Título: {ut}\nAutor: {ua}\nCategoría: {uc}\nReferencia: {ur}\n\n{ul}"
-                if guardar_en_github(nombre_f, nuevo_cont): st.success("¡Actualizado!"); st.rerun()
+                if guardar_en_github(nombre_f, nuevo_cont): 
+                    st.success("¡Actualizado!")
+                    st.rerun()
             if st.button("Borrar", key=f"db_{i}"):
-                eliminar_de_github(row['archivo']); st.rerun()
+                if eliminar_de_github(row['archivo']):
+                    st.rerun()
 
 elif menu == "⚙️ Categorías":
     st.header("⚙️ Categorías")
     nueva_cat = st.text_input("Añadir:")
     if st.button("Guardar"):
-        if nueva_cat and nueva_cat not in categorias:
-            categorias.append(nueva_cat)
-            if guardar_en_github("categorias.txt", ",".join(categorias)):
-                st.success("Categoría añadida.")
-                st.rerun()
+        if nueva_cat and nueva_cat.strip() not in categorias:
+            categorias.append(nueva_cat.strip())
+            if guardar_en_github("categorias", ",".join(categorias)):
+                st.rerun() # Ahora st.rerun() funcionará porque el cache se limpia arriba
+    
+    st.write("Categorías actuales (Haz clic en eliminar para quitar):")
     for c in categorias:
         col_c, col_b = st.columns([3, 1])
         col_c.write(f"• {c}")
         if col_b.button("Eliminar", key=f"d_cat_{c}"):
             categorias.remove(c)
-            if guardar_en_github("categorias.txt", ",".join(categorias)):
+            if guardar_en_github("categorias", ",".join(categorias)):
                 st.rerun()
 
 if st.sidebar.button("🔄 Refrescar Nube"):
-    st.cache_data.clear(); st.rerun()
+    st.cache_data.clear()
+    st.rerun()
