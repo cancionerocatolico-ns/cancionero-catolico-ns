@@ -103,7 +103,6 @@ def procesar_texto_final(texto, semitonos):
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
 
-# Cargar Categorías
 cat_raw = leer_archivo_github("canciones/categorias.txt")
 categorias = cat_raw.split(',') if cat_raw else ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
 
@@ -154,13 +153,9 @@ if menu == "🏠 Cantar / Vivo":
                 st.session_state.setlist.append(sel_c); st.toast("Añadida")
         tp = c_tp.number_input("Transportar", -6, 6, 0)
         
-        # --- VENTANA DE REFERENCIA ---
+        # --- BOTÓN DE REFERENCIA (VENTANA NUEVA) ---
         if data["Referencia"]:
-            with st.expander("📺 Ver Referencia de la Canción"):
-                if "youtube.com" in data["Referencia"] or "youtu.be" in data["Referencia"]:
-                    st.video(data["Referencia"])
-                else:
-                    st.link_button("🌐 Abrir Referencia Externa", data["Referencia"])
+            st.link_button("🎵 Abrir Referencia en Ventana Nueva", data["Referencia"], use_container_width=True)
 
         st.markdown(f'''
             <div class="visor-musical">
@@ -177,7 +172,7 @@ elif menu == "➕ Agregar Canción":
     t_n = c1.text_input("Título")
     a_n = c2.text_input("Autor")
     cat_n = st.selectbox("Categoría", categorias)
-    r_n = st.text_input("Referencia (URL YouTube o Spotify)")
+    r_n = st.text_input("Referencia (URL YouTube, Spotify, etc.)")
     l_n = st.text_area("Letra y Acordes:", height=350)
     
     if l_n:
@@ -203,8 +198,7 @@ elif menu == "📋 Mi Setlist":
                     if st.button("Quitar", key=f"del_{i}"):
                         st.session_state.setlist.pop(i); st.rerun()
                     if data["Referencia"]: 
-                        if "youtube" in data["Referencia"]: st.video(data["Referencia"])
-                        else: st.link_button("Abrir Referencia", data["Referencia"])
+                        st.link_button("🌐 Ir a Referencia", data["Referencia"])
                     st.markdown(f'<div class="visor-musical">{procesar_texto_final(data["Letra"], 0)}</div>', unsafe_allow_html=True)
 
 elif menu == "📂 Gestionar / Editar":
