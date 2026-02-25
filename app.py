@@ -30,6 +30,7 @@ def leer_canciones_github():
     if response.status_code == 200:
         archivos = response.json()
         for archivo in archivos:
+            # Solo leer archivos .txt que NO sean el de categorías
             if archivo['name'].endswith('.txt') and archivo['name'] != 'categorias.txt':
                 res_file = requests.get(archivo['download_url'])
                 content = res_file.text
@@ -46,15 +47,23 @@ def leer_canciones_github():
                 })
     return pd.DataFrame(canciones)
 
-def guardar_en_github(nombre_archivo, contenido, es_config=False):
-    path = f"canciones/{nombre_archivo}.txt" if not es_config else f"canciones/{nombre_archivo}"
+def guardar_en_github(nombre_archivo, contenido):
+    # Forzamos que siempre tenga extensión .txt y esté en la carpeta canciones
+    if not nombre_archivo.endswith(".txt"):
+        nombre_archivo += ".txt"
+    
+    path = f"canciones/{nombre_archivo}"
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     headers = {"Authorization": f"token {TOKEN}"}
+    
+    # Obtener el SHA si el archivo ya existe
     res = requests.get(url, headers=headers)
     sha = res.json().get('sha') if res.status_code == 200 else None
+    
     content_b64 = base64.b64encode(contenido.encode('utf-8')).decode('utf-8')
     payload = {"message": f"Update {nombre_archivo}", "content": content_b64}
     if sha: payload["sha"] = sha
+    
     return requests.put(url, headers=headers, json=payload).status_code in [200, 201]
 
 def eliminar_de_github(nombre_archivo):
@@ -109,8 +118,12 @@ def procesar_texto_final(texto, semitonos):
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
 
+# Carga de categorías corregida
 cat_raw = leer_archivo_github("canciones/categorias.txt")
-categorias = cat_raw.split(',') if cat_raw else ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
+if cat_raw:
+    categorias = [c.strip() for c in cat_raw.split(',') if c.strip()]
+else:
+    categorias = ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
 
 df = leer_canciones_github()
 
@@ -157,7 +170,6 @@ if menu == "🏠 Cantar / Vivo":
                 st.session_state.setlist.append(sel_c); st.toast("Añadida")
         tp = c_tp.number_input("Transportar", -6, 6, 0)
         
-        # LINK DE ACCESO DIRECTO (Solo si existe referencia)
         if data["Referencia"]:
             st.link_button("🔗 Abrir Referencia", data["Referencia"], use_container_width=True)
 
@@ -226,13 +238,16 @@ elif menu == "⚙️ Categorías":
     if st.button("Guardar"):
         if nueva_cat and nueva_cat not in categorias:
             categorias.append(nueva_cat)
-            guardar_en_github("categorias", ",".join(categorias), es_config=True); st.rerun()
+            if guardar_en_github("categorias.txt", ",".join(categorias)):
+                st.success("Categoría añadida.")
+                st.rerun()
     for c in categorias:
         col_c, col_b = st.columns([3, 1])
         col_c.write(f"• {c}")
         if col_b.button("Eliminar", key=f"d_cat_{c}"):
             categorias.remove(c)
-            guardar_en_github("categorias", ",".join(categorias), es_config=True); st.rerun()
+            if guardar_en_github("categorias.txt", ",".join(categorias)):
+                st.rerun()
 
 if st.sidebar.button("🔄 Refrescar Nube"):
     st.cache_data.clear(); st.rerun()
