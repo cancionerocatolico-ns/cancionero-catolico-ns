@@ -16,45 +16,52 @@ if "user_agent" in st.context.headers:
 TOKEN = st.secrets["GITHUB_TOKEN"]
 REPO = st.secrets["GITHUB_REPO"]
 
-# --- FUNCIONES DE COMUNICACIÓN (ANTI-CACHE) ---
+# --- FUNCIONES DE COMUNICACIÓN (SOLUCIÓN AL CACHE) ---
 
 def cargar_categorias_csv():
-    """Lee las categorías del CSV forzando la versión más reciente de GitHub."""
+    """Carga categorías forzando la lectura de la versión más reciente de GitHub."""
     path = "canciones/categorias.csv"
-    timestamp = int(time.time())
-    url = f"https://api.github.com/repos/{REPO}/contents/{path}?t={timestamp}"
+    # Usamos un timestamp único para engañar al cache de GitHub y Streamlit
+    t_fuerza = int(time.time())
+    url = f"https://api.github.com/repos/{REPO}/contents/{path}?t={t_fuerza}"
     headers = {
         "Authorization": f"token {TOKEN}",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache"
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
     }
     
-    # Limpiamos cache de Streamlit antes de intentar leer
+    # Limpieza total de cache de Streamlit antes de leer
     st.cache_data.clear()
     
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         try:
-            # Forzamos también el download_url para saltar el CDN de GitHub
-            csv_url = res.json()['download_url'] + f"&nocache={timestamp}"
-            content = requests.get(csv_url).text
+            # Añadimos el parámetro nocache a la URL de descarga directa
+            download_url = res.json()['download_url'] + f"&nocache={t_fuerza}"
+            content = requests.get(download_url).text
+            
+            # Leemos el CSV (sep=',' para el formato que ya tienes en GitHub)
             df_cat = pd.read_csv(io.StringIO(content), sep=',', skip_blank_lines=True)
+            
             if 'nombre' in df_cat.columns:
                 lista = df_cat['nombre'].dropna().unique().tolist()
-                return sorted([str(c).strip() for c in lista if str(c).strip()])
-        except:
+                # Limpiamos cada palabra de espacios raros
+                return sorted([str(c).strip() for c in lista if str(c).strip() and "Error" not in str(c)])
+        except Exception as e:
             pass
+            
+    # Si falla algo, devolvemos básicos para no bloquear la app
     return ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
 
 def guardar_categorias_csv(lista_cats):
-    """Guarda el CSV con formato de comas para activar el buscador de GitHub."""
-    # Generamos el CSV manualmente para asegurar la coma final de compatibilidad
+    """Guarda el CSV con formato de comas para mantener el visor de GitHub activo."""
+    # Reconstruimos el CSV asegurando la coma final
     csv_content = "nombre,\n" + "\n".join([f"{c}," for c in lista_cats])
     path = "canciones/categorias.csv"
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     headers = {"Authorization": f"token {TOKEN}"}
     
-    # Obtener SHA para actualizar
     res = requests.get(url, headers=headers)
     sha = res.json().get('sha') if res.status_code == 200 else None
     
@@ -64,23 +71,21 @@ def guardar_categorias_csv(lista_cats):
     
     if requests.put(url, headers=headers, json=payload).status_code in [200, 201]:
         st.cache_data.clear()
-        time.sleep(1.5) # Espera un poco más para que GitHub procese el archivo
+        time.sleep(2) # Pausa extra para que GitHub refresque sus servidores
         return True
     return False
 
 def leer_canciones_github():
-    """Lee todas las canciones forzando datos frescos."""
-    timestamp = int(time.time())
-    url = f"https://api.github.com/repos/{REPO}/contents/canciones?t={timestamp}"
+    t_fuerza = int(time.time())
+    url = f"https://api.github.com/repos/{REPO}/contents/canciones?t={t_fuerza}"
     headers = {"Authorization": f"token {TOKEN}", "Cache-Control": "no-cache"}
     response = requests.get(url, headers=headers)
     canciones = []
     
     if response.status_code == 200:
         for archivo in response.json():
-            # Ignorar el CSV de categorías y otros archivos que no sean .txt
             if archivo['name'].endswith('.txt') and not archivo['name'].startswith('categorias'):
-                res_file = requests.get(archivo['download_url'] + f"&t={timestamp}")
+                res_file = requests.get(archivo['download_url'] + f"&t={t_fuerza}")
                 content = res_file.text
                 lineas = content.split('\n')
                 
@@ -97,19 +102,15 @@ def leer_canciones_github():
     return pd.DataFrame(canciones)
 
 def guardar_en_github(nombre_archivo, contenido):
-    """Guarda una canción en la carpeta /canciones/."""
     if not nombre_archivo.endswith(".txt"): nombre_archivo += ".txt"
     path = f"canciones/{nombre_archivo}"
     url = f"https://api.github.com/repos/{REPO}/contents/{path}"
     headers = {"Authorization": f"token {TOKEN}"}
-    
     res = requests.get(url, headers=headers)
     sha = res.json().get('sha') if res.status_code == 200 else None
-    
     content_b64 = base64.b64encode(contenido.encode('utf-8')).decode('utf-8')
     payload = {"message": f"Update {nombre_archivo}", "content": content_b64}
     if sha: payload["sha"] = sha
-    
     if requests.put(url, headers=headers, json=payload).status_code in [200, 201]:
         st.cache_data.clear()
         time.sleep(1)
@@ -157,7 +158,7 @@ def procesar_texto_final(texto, semitonos):
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
 
-# Carga inicial (Usamos los nuevos motores anti-cache)
+# Carga con limpieza de cache integrada
 categorias = cargar_categorias_csv()
 df = leer_canciones_github()
 
@@ -182,7 +183,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
-# --- LÓGICA DE MÓDULOS ---
+# --- MÓDULOS ---
 
 if menu == "🏠 Cantar / Vivo":
     col1, col2 = st.columns([2, 1])
@@ -228,8 +229,8 @@ elif menu == "📂 Gestionar / Editar":
                 if guardar_en_github(row['archivo'], nuevo_cont): st.success("¡OK!"); st.rerun()
 
 elif menu == "⚙️ Categorías":
-    st.header("⚙️ Gestión por CSV")
-    nueva_c = st.text_input("Nombre:")
+    st.header("⚙️ Gestión Categorías")
+    nueva_c = st.text_input("Nueva categoría:")
     if st.button("Añadir"):
         if nueva_c and nueva_c.strip() not in categorias:
             categorias.append(nueva_c.strip())
