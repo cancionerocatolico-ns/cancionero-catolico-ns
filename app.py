@@ -28,6 +28,7 @@ def leer_canciones_github():
                 res_file = requests.get(archivo['download_url'])
                 content = res_file.text
                 lineas = content.split('\n')
+                # Parseo de metadatos
                 titulo = lineas[0].replace("Título: ", "").strip() if "Título: " in lineas[0] else archivo['name']
                 autor = lineas[1].replace("Autor: ", "").strip() if len(lineas) > 1 and "Autor: " in lineas[1] else "Anónimo"
                 categoria = lineas[2].replace("Categoría: ", "").strip() if len(lineas) > 2 and "Categoría: " in lineas[2] else "Varios"
@@ -45,7 +46,7 @@ def guardar_en_github(nombre_archivo, contenido, es_config=False):
     res = requests.get(url, headers=headers)
     sha = res.json().get('sha') if res.status_code == 200 else None
     content_b64 = base64.b64encode(contenido.encode('utf-8')).decode('utf-8')
-    payload = {"message": f"Actualizar {nombre_archivo}", "content": content_b64}
+    payload = {"message": f"Update {nombre_archivo}", "content": content_b64}
     if sha: payload["sha"] = sha
     return requests.put(url, headers=headers, json=payload).status_code in [200, 201]
 
@@ -56,7 +57,7 @@ def eliminar_de_github(nombre_archivo):
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         sha = res.json().get('sha')
-        payload = {"message": f"Eliminar {nombre_archivo}", "sha": sha}
+        payload = {"message": f"Delete {nombre_archivo}", "sha": sha}
         return requests.delete(url, headers=headers, json=payload).status_code == 200
     return False
 
@@ -91,7 +92,7 @@ def procesar_texto_final(texto, semitonos):
         if not linea.strip():
             lineas.append("&nbsp;")
             continue
-        es_linea_acordes = (linea.count(" ") / len(linea)) > 0.2 if len(linea) > 6 else True
+        es_linea_acordes = (linea.count(" ") / len(linea)) > 0.18 if len(linea) > 5 else True
         partes = re.split(r"(\s+)", linea)
         procesada = "".join([p if p.strip() == "" else procesar_palabra(p, semitonos, es_linea_acordes) for p in partes])
         lineas.append(procesada.replace(" ", "&nbsp;"))
@@ -101,7 +102,7 @@ def procesar_texto_final(texto, semitonos):
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
 
-# Cargar Categorías desde GitHub
+# Cargar Categorías
 cat_raw = leer_archivo_github("canciones/categorias.txt")
 categorias = cat_raw.split(',') if cat_raw else ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
 
@@ -116,15 +117,24 @@ c_txt = st.sidebar.color_picker("Color Letra", "#000000")
 c_chord = st.sidebar.color_picker("Color Acordes", "#D32F2F")
 f_size = st.sidebar.slider("Tamaño Fuente", 12, 45, 18)
 
+# --- ESTILOS CSS UNIFICADOS ---
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap');
-    .visor-musical {{ 
-        font-family: 'Courier Prime', monospace !important; 
-        background-color: {c_bg} !important; color: {c_txt} !important; 
-        border-radius: 12px; padding: 25px; border: 1px solid #ddd; 
-        line-height: 1.2; font-size: {f_size}px;
+    
+    .visor-musical, textarea, .stTextArea textarea {{
+        font-family: 'Courier Prime', monospace !important;
+        line-height: 1.2 !important;
+        font-size: {f_size}px !important;
     }}
+
+    .visor-musical {{ 
+        background-color: {c_bg} !important; 
+        color: {c_txt} !important; 
+        border-radius: 12px; padding: 25px; border: 1px solid #ddd; 
+        overflow-x: auto;
+    }}
+
     .visor-musical b {{ font-weight: 700 !important; color: {c_chord} !important; }}
     </style>
     """, unsafe_allow_html=True)
@@ -133,60 +143,80 @@ st.markdown(f"""
 
 if menu == "🏠 Cantar / Vivo":
     col1, col2 = st.columns([2, 1])
-    busqueda = col1.text_input("🔍 Buscar...")
-    filtro_cat = col2.selectbox("📂 Filtro", ["Todas"] + categorias)
+    busqueda = col1.text_input("🔍 Buscar canción...")
+    filtro_cat = col2.selectbox("📂 Categoría", ["Todas"] + categorias)
     df_v = df.copy()
     if busqueda and not df_v.empty: df_v = df_v[df_v['Título'].str.contains(busqueda, case=False, na=False)]
     if filtro_cat != "Todas" and not df_v.empty: df_v = df_v[df_v['Categoría'] == filtro_cat]
+    
     if not df_v.empty:
         sel_c = st.selectbox("Selecciona:", df_v['Título'])
         data = df_v[df_v['Título'] == sel_c].iloc[0]
-        tp = st.number_input("Transportar", -6, 6, 0)
+        c_at, c_tp = st.columns([1, 1])
+        if c_at.button("➕ Al Setlist", use_container_width=True):
+            if sel_c not in st.session_state.setlist:
+                st.session_state.setlist.append(sel_c); st.toast("Añadida")
+        tp = c_tp.number_input("Transportar", -6, 6, 0)
         st.markdown(f'<div class="visor-musical"><h2>{data["Título"]}</h2><p>{data["Autor"]} | {data["Categoría"]}</p><hr>{procesar_texto_final(data["Letra"], tp)}</div>', unsafe_allow_html=True)
 
 elif menu == "➕ Agregar Canción":
     st.header("➕ Nueva Canción")
-    t_n = st.text_input("Título")
-    a_n = st.text_input("Autor")
+    c1, c2 = st.columns(2)
+    t_n = c1.text_input("Título")
+    a_n = c2.text_input("Autor")
     cat_n = st.selectbox("Categoría", categorias)
-    l_n = st.text_area("Letra y Acordes:", height=300)
+    l_n = st.text_area("Letra y Acordes (Alineación Monoespaciada):", height=350)
+    
     if l_n:
+        st.subheader("👀 Vista Previa")
         st.markdown(f'<div class="visor-musical">{procesar_texto_final(l_n, 0)}</div>', unsafe_allow_html=True)
+    
     if st.button("💾 Guardar en GitHub"):
         if t_n and l_n:
             nombre_f = t_n.lower().replace(" ", "_")
             contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\n\n{l_n}"
             if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
 
+elif menu == "📋 Mi Setlist":
+    st.header("📋 Mi Setlist")
+    if not st.session_state.setlist:
+        st.info("Setlist vacío.")
+    else:
+        for i, t in enumerate(st.session_state.setlist):
+            with st.expander(f"🎵 {i+1}. {t}"):
+                cancion = df[df['Título'] == t]
+                if not cancion.empty:
+                    data = cancion.iloc[0]
+                    if st.button("Quitar", key=f"del_{i}"):
+                        st.session_state.setlist.pop(i); st.rerun()
+                    st.markdown(f'<div class="visor-musical">{procesar_texto_final(data["Letra"], 0)}</div>', unsafe_allow_html=True)
+
 elif menu == "⚙️ Categorías":
-    st.header("⚙️ Gestionar Categorías")
-    nueva_cat = st.text_input("Nueva Categoría:")
-    if st.button("Añadir"):
+    st.header("⚙️ Categorías")
+    nueva_cat = st.text_input("Añadir:")
+    if st.button("Guardar Categoría"):
         if nueva_cat and nueva_cat not in categorias:
             categorias.append(nueva_cat)
             guardar_en_github("categorias", ",".join(categorias), es_config=True)
             st.rerun()
-    
-    st.write("---")
     for c in categorias:
         col_c, col_b = st.columns([3, 1])
         col_c.write(f"• {c}")
-        if col_b.button("Eliminar", key=f"del_{c}"):
+        if col_b.button("Eliminar", key=f"d_cat_{c}"):
             categorias.remove(c)
             guardar_en_github("categorias", ",".join(categorias), es_config=True)
             st.rerun()
 
 elif menu == "📂 Gestionar / Editar":
-    st.header("📂 Editar Biblioteca")
+    st.header("📂 Editar")
     for i, row in df.iterrows():
         with st.expander(f"📝 {row['Título']}"):
-            ut = st.text_input("Título", row['Título'], key=f"e_t_{i}")
-            uc = st.selectbox("Categoría", categorias, index=categorias.index(row['Categoría']) if row['Categoría'] in categorias else 0, key=f"e_c_{i}")
-            ul = st.text_area("Letra", row['Letra'], height=250, key=f"e_l_{i}")
-            if st.button("Guardar Cambios", key=f"b_u_{i}"):
-                guardar_en_github(row['archivo'].replace(".txt", ""), f"Título: {ut}\nAutor: {row['Autor']}\nCategoría: {uc}\n\n{ul}")
+            ut = st.text_input("Título", row['Título'], key=f"et_{i}")
+            ul = st.text_area("Letra", row['Letra'], height=300, key=f"el_{i}")
+            if st.button("Actualizar", key=f"ub_{i}"):
+                guardar_en_github(row['archivo'].replace(".txt", ""), f"Título: {ut}\nAutor: {row['Autor']}\nCategoría: {row['Categoría']}\n\n{ul}")
                 st.rerun()
-            if st.button("Eliminar Permanente", key=f"b_d_{i}"):
+            if st.button("Borrar", key=f"db_{i}"):
                 eliminar_de_github(row['archivo']); st.rerun()
 
 if st.sidebar.button("🔄 Refrescar Nube"):
