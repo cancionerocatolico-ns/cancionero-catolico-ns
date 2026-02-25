@@ -28,6 +28,7 @@ def leer_canciones_github():
                 res_file = requests.get(archivo['download_url'])
                 content = res_file.text
                 lineas = content.split('\n')
+                # Parseo de metadatos (Título, Autor, Categoría, Referencia)
                 titulo = lineas[0].replace("Título: ", "").strip() if "Título: " in lineas[0] else archivo['name']
                 autor = lineas[1].replace("Autor: ", "").strip() if len(lineas) > 1 and "Autor: " in lineas[1] else "Anónimo"
                 categoria = lineas[2].replace("Categoría: ", "").strip() if len(lineas) > 2 and "Categoría: " in lineas[2] else "Varios"
@@ -102,20 +103,22 @@ def procesar_texto_final(texto, semitonos):
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
 
+# Cargar Categorías
 cat_raw = leer_archivo_github("canciones/categorias.txt")
 categorias = cat_raw.split(',') if cat_raw else ["Entrada", "Piedad", "Gloria", "Ofertorio", "Comunión", "Salida"]
 
 df = leer_canciones_github()
 
+# Sidebar
 st.sidebar.title("🎸 ChordMaster")
 menu = st.sidebar.selectbox("Menú:", ["🏠 Cantar / Vivo", "📋 Mi Setlist", "➕ Agregar Canción", "📂 Gestionar / Editar", "⚙️ Categorías"])
 st.sidebar.markdown("---")
-st.sidebar.subheader("🎨 Estética")
 c_bg = st.sidebar.color_picker("Fondo Visor", "#FFFFFF")
 c_txt = st.sidebar.color_picker("Color Letra", "#000000")
 c_chord = st.sidebar.color_picker("Color Acordes", "#D32F2F")
 f_size = st.sidebar.slider("Tamaño Fuente", 12, 45, 18)
 
+# CSS Unificado
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap');
@@ -151,14 +154,13 @@ if menu == "🏠 Cantar / Vivo":
                 st.session_state.setlist.append(sel_c); st.toast("Añadida")
         tp = c_tp.number_input("Transportar", -6, 6, 0)
         
-        # --- VENTANA DE REFERENCIA (DENTRO DE LA APP) ---
+        # --- VENTANA DE REFERENCIA ---
         if data["Referencia"]:
-            with st.expander("📺 Abrir Ventana de Referencia"):
+            with st.expander("📺 Ver Referencia de la Canción"):
                 if "youtube.com" in data["Referencia"] or "youtu.be" in data["Referencia"]:
                     st.video(data["Referencia"])
                 else:
-                    st.info(f"Link externo: {data['Referencia']}")
-                    st.markdown(f'<a href="{data["Referencia"]}" target="_blank">🔗 Abrir en pestaña nueva</a>', unsafe_allow_html=True)
+                    st.link_button("🌐 Abrir Referencia Externa", data["Referencia"])
 
         st.markdown(f'''
             <div class="visor-musical">
@@ -175,7 +177,7 @@ elif menu == "➕ Agregar Canción":
     t_n = c1.text_input("Título")
     a_n = c2.text_input("Autor")
     cat_n = st.selectbox("Categoría", categorias)
-    r_n = st.text_input("Referencia (URL de YouTube o Spotify)")
+    r_n = st.text_input("Referencia (URL YouTube o Spotify)")
     l_n = st.text_area("Letra y Acordes:", height=350)
     
     if l_n:
@@ -200,7 +202,9 @@ elif menu == "📋 Mi Setlist":
                     data = cancion.iloc[0]
                     if st.button("Quitar", key=f"del_{i}"):
                         st.session_state.setlist.pop(i); st.rerun()
-                    if data["Referencia"]: st.video(data["Referencia"]) if "youtube" in data["Referencia"] else st.write(data["Referencia"])
+                    if data["Referencia"]: 
+                        if "youtube" in data["Referencia"]: st.video(data["Referencia"])
+                        else: st.link_button("Abrir Referencia", data["Referencia"])
                     st.markdown(f'<div class="visor-musical">{procesar_texto_final(data["Letra"], 0)}</div>', unsafe_allow_html=True)
 
 elif menu == "📂 Gestionar / Editar":
