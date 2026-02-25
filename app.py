@@ -102,4 +102,31 @@ if menu == "🏠 Cantar":
                     <hr>
                     {procesar_texto_final(data["Letra"], tp)}
                 </div>
-            ''',
+            ''', unsafe_allow_html=True)
+
+elif menu == "📋 Mi Setlist":
+    st.header("📋 Setlist del Día")
+    if 'setlist' in st.session_state and st.session_state.setlist:
+        for cancion_nombre in st.session_state.setlist:
+            with st.expander(f"📖 {cancion_nombre}"):
+                data_s = df[df['Título'] == cancion_nombre].iloc[0]
+                st.markdown(f'<div class="visor-musical">{procesar_texto_final(data_s["Letra"], 0)}</div>', unsafe_allow_html=True)
+        if st.button("🗑️ Borrar Setlist"):
+            st.session_state.setlist = []
+            st.rerun()
+    else:
+        st.info("Tu setlist está vacío. Ve a 'Cantar' y añade algunas canciones.")
+
+elif menu == "➕ Agregar Canción":
+    st.header("➕ Agregar a la Nube")
+    st.warning("Debido a restricciones de seguridad de Google, para guardar canciones nuevas debes hacerlo directamente en la hoja de cálculo.")
+    st.link_button("🚀 Abrir Google Sheets para Escribir", EDIT_URL)
+    st.info("Una vez que escribas la canción en la hoja, vuelve aquí y selecciona 'Gestionar Base' -> 'Refrescar'.")
+
+elif menu == "📂 Gestionar Base":
+    st.header("📂 Gestión de Datos")
+    st.write(f"Total de canciones: {len(df)}")
+    st.dataframe(df)
+    if st.button("🔄 Refrescar y Sincronizar"):
+        st.session_state.cb = st.session_state.get('cb', 0) + 1
+        st.rerun()
