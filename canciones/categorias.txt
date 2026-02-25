@@ -1,1 +1,1 @@
-Entrada,Piedad,Gloria,Ofertorio,Comunión,Salida,Cordero,Alabanza,Adoración,Acción de Gracias,Entrega,Sanación,Perdon,Oración,Amor de Dios,Renovación,Espiritu Santo,Varios
+Acción de Gracias,Adoración,Alabanza,Amor de Dios,Comunión,Cordero,Entrada,Entrega,Espiritu Santo,Gloria,Ofertorio,Oración,Perdon,Piedad,Renovación,Salida,Sanación,Varios,Varios2
