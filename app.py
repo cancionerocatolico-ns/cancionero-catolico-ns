@@ -4,6 +4,12 @@ import requests
 import base64
 import re
 
+# --- OPTIMIZACIÓN CRON-JOB (Mantener Vivo) ---
+if "user_agent" in st.context.headers:
+    if "cron-job.org" in st.context.headers["user_agent"]:
+        st.write("Ping recibido.")
+        st.stop()
+
 # --- CONFIGURACIÓN DE GITHUB ---
 TOKEN = st.secrets["GITHUB_TOKEN"]
 REPO = st.secrets["GITHUB_REPO"]
@@ -28,7 +34,7 @@ def leer_canciones_github():
                 res_file = requests.get(archivo['download_url'])
                 content = res_file.text
                 lineas = content.split('\n')
-                # Parseo de metadatos (Título, Autor, Categoría, Referencia)
+                # Parseo de metadatos
                 titulo = lineas[0].replace("Título: ", "").strip() if "Título: " in lineas[0] else archivo['name']
                 autor = lineas[1].replace("Autor: ", "").strip() if len(lineas) > 1 and "Autor: " in lineas[1] else "Anónimo"
                 categoria = lineas[2].replace("Categoría: ", "").strip() if len(lineas) > 2 and "Categoría: " in lineas[2] else "Varios"
@@ -108,7 +114,6 @@ categorias = cat_raw.split(',') if cat_raw else ["Entrada", "Piedad", "Gloria", 
 
 df = leer_canciones_github()
 
-# Sidebar
 st.sidebar.title("🎸 ChordMaster")
 menu = st.sidebar.selectbox("Menú:", ["🏠 Cantar / Vivo", "📋 Mi Setlist", "➕ Agregar Canción", "📂 Gestionar / Editar", "⚙️ Categorías"])
 st.sidebar.markdown("---")
@@ -117,7 +122,6 @@ c_txt = st.sidebar.color_picker("Color Letra", "#000000")
 c_chord = st.sidebar.color_picker("Color Acordes", "#D32F2F")
 f_size = st.sidebar.slider("Tamaño Fuente", 12, 45, 18)
 
-# CSS Unificado
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap');
@@ -153,9 +157,9 @@ if menu == "🏠 Cantar / Vivo":
                 st.session_state.setlist.append(sel_c); st.toast("Añadida")
         tp = c_tp.number_input("Transportar", -6, 6, 0)
         
-        # --- BOTÓN DE REFERENCIA (VENTANA NUEVA) ---
+        # LINK DE ACCESO DIRECTO (Solo si existe referencia)
         if data["Referencia"]:
-            st.link_button("🎵 Abrir Referencia en Ventana Nueva", data["Referencia"], use_container_width=True)
+            st.link_button("🔗 Abrir Referencia", data["Referencia"], use_container_width=True)
 
         st.markdown(f'''
             <div class="visor-musical">
@@ -172,7 +176,7 @@ elif menu == "➕ Agregar Canción":
     t_n = c1.text_input("Título")
     a_n = c2.text_input("Autor")
     cat_n = st.selectbox("Categoría", categorias)
-    r_n = st.text_input("Referencia (URL YouTube, Spotify, etc.)")
+    r_n = st.text_input("Referencia (Link)")
     l_n = st.text_area("Letra y Acordes:", height=350)
     
     if l_n:
@@ -197,8 +201,7 @@ elif menu == "📋 Mi Setlist":
                     data = cancion.iloc[0]
                     if st.button("Quitar", key=f"del_{i}"):
                         st.session_state.setlist.pop(i); st.rerun()
-                    if data["Referencia"]: 
-                        st.link_button("🌐 Ir a Referencia", data["Referencia"])
+                    if data["Referencia"]: st.link_button("Ir a Referencia", data["Referencia"])
                     st.markdown(f'<div class="visor-musical">{procesar_texto_final(data["Letra"], 0)}</div>', unsafe_allow_html=True)
 
 elif menu == "📂 Gestionar / Editar":
