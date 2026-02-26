@@ -1,6 +1,0 @@
-Título: index.txt
-Autor: Anónimo
-Categoría: Entrada
-Referencia: 
-
-Hola
