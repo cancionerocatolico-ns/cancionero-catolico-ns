@@ -3,10 +3,12 @@ Autor: Por confirmar
 Categoría: Alabanza
 Referencia: 
 
-Rem   Sol#m
+Rem                Sib        DoM       Lam      Rem
 Por que de él y por él y para él son todas las cosas
+Rem                Sib        DoM       Lam      Rem
 Por que de él y por él y para él son todas las cosas
 
+        Sib DoM         FaM Rem         Sib Lam             Rem 
 A El la gloria, a Él la gloria, a él la gloria, por siempre amén
 
 Cuán profundas riquezas, el saber y conocer de Dios
