@@ -15,9 +15,9 @@ if "user_agent" in st.context.headers:
 TOKEN = st.secrets["GITHUB_TOKEN"]
 REPO = st.secrets["GITHUB_REPO"]
 
-# --- FUNCIÓN PARA LIMPIAR NOMBRES (Única adición al código) ---
+# --- FUNCIÓN PARA LIMPIAR NOMBRES (Solución tildes) ---
 def limpiar_nombre_archivo(texto):
-    """Evita que archivos con tildes rompan el repositorio de GitHub."""
+    """Evita caracteres extraños en GitHub como \303\251."""
     texto = unicodedata.normalize('NFD', texto)
     texto = texto.encode('ascii', 'ignore').decode("utf-8")
     return re.sub(r'[^a-zA-Z0-9_]', '', texto.replace(" ", "_")).lower()
@@ -76,7 +76,7 @@ def eliminar_de_github(nombre_archivo):
         return requests.delete(url, headers=headers, json=payload).status_code == 200
     return False
 
-# --- PROCESAMIENTO MUSICAL (Tu lógica corregida intacta) ---
+# --- PROCESAMIENTO MUSICAL (Lógica exacta original) ---
 NOTAS_LAT = ["Do", "Do#", "Re", "Re#", "Mi", "Fa", "Fa#", "Sol", "Sol#", "La", "La#", "Si"]
 NOTAS_AMER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -92,7 +92,6 @@ def procesar_palabra(palabra, semitonos, es_linea_acordes):
     match = re.match(patron, palabra)
     if match:
         raiz, resto = match.group(1), match.group(2)
-        # Tu filtro de seguridad para palabras comunes
         if raiz in ["Si", "La", "A"] and not resto and not es_linea_acordes: return palabra
         if semitonos == 0: return f"<b>{palabra}</b>"
         dic_bemoles = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
@@ -108,7 +107,6 @@ def procesar_texto_final(texto, semitonos):
         if not linea.strip():
             lineas.append("&nbsp;")
             continue
-        # Tu lógica de densidad original
         es_linea_acordes = (linea.count(" ") / len(linea)) > 0.18 if len(linea) > 5 else True
         partes = re.split(r"(\s+)", linea)
         procesada = "".join([p if p.strip() == "" else procesar_palabra(p, semitonos, es_linea_acordes) for p in partes])
@@ -165,18 +163,35 @@ if menu == "🏠 Cantar / Vivo":
             if sel_c not in st.session_state.setlist:
                 st.session_state.setlist.append(sel_c); st.toast("Añadida")
         tp = c_tp.number_input("Transportar", -6, 6, 0)
-        if data["Referencia"]: st.link_button("🔗 Abrir Referencia", data["Referencia"], use_container_width=True)
-        st.markdown(f'''<div class="visor-musical"><h2 style="margin:0; color:inherit;">{data["Título"]}</h2><p style="margin-top:0; opacity:0.7;">{data["Autor"]} | {data["Categoría"]}</p><hr style="border-color: {c_txt}; opacity:0.2;">{procesar_texto_final(data["Letra"], tp)}</div>''', unsafe_allow_html=True)
+        if data["Referencia"]:
+            st.link_button("🔗 Abrir Referencia", data["Referencia"], use_container_width=True)
+
+        st.markdown(f'''
+            <div class="visor-musical">
+                <h2 style="margin:0; color:inherit;">{data["Título"]}</h2>
+                <p style="margin-top:0; opacity:0.7;">{data["Autor"]} | {data["Categoría"]}</p>
+                <hr style="border-color: {c_txt}; opacity:0.2;">
+                {procesar_texto_final(data["Letra"], tp)}
+            </div>
+        ''', unsafe_allow_html=True)
 
 elif menu == "➕ Agregar Canción":
     st.header("➕ Nueva Canción")
     c1, c2 = st.columns(2)
-    t_n = c1.text_input("Título"); a_n = c2.text_input("Autor")
-    cat_n = st.selectbox("Categoría", categorias); r_n = st.text_input("Referencia (Link)")
+    t_n = c1.text_input("Título")
+    a_n = c2.text_input("Autor")
+    cat_n = st.selectbox("Categoría", categorias)
+    r_n = st.text_input("Referencia (Link)")
     l_n = st.text_area("Letra y Acordes:", height=350)
+    
+    if l_n:
+        st.subheader("👀 Vista Previa")
+        st.markdown(f'<div class="visor-musical">{procesar_texto_final(l_n, 0)}</div>', unsafe_allow_html=True)
+    
     if st.button("💾 Guardar en GitHub"):
         if t_n and l_n:
-            nombre_f = limpiar_nombre_archivo(t_n) # Limpieza segura
+            # LIMPIEZA DE NOMBRE DE ARCHIVO
+            nombre_f = limpiar_nombre_archivo(t_n)
             contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\nReferencia: {r_n}\n\n{l_n}"
             if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
 
@@ -190,7 +205,8 @@ elif menu == "📂 Gestionar / Editar":
             uc = st.selectbox("Categoría", categorias, index=categorias.index(row['Categoría']) if row['Categoría'] in categorias else 0, key=f"ec_{i}")
             ul = st.text_area("Letra", row['Letra'], height=300, key=f"el_{i}")
             if st.button("Actualizar", key=f"ub_{i}"):
-                nombre_f = limpiar_nombre_archivo(ut) # Limpieza segura al editar
+                # Al actualizar también limpiamos el nombre por si cambió el título
+                nombre_f = limpiar_nombre_archivo(ut)
                 nuevo_cont = f"Título: {ut}\nAutor: {ua}\nCategoría: {uc}\nReferencia: {ur}\n\n{ul}"
                 if guardar_en_github(nombre_f, nuevo_cont): st.success("¡Actualizado!"); st.rerun()
             if st.button("Borrar", key=f"db_{i}"):
