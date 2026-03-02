@@ -76,7 +76,7 @@ def eliminar_de_github(nombre_archivo):
         return requests.delete(url, headers=headers, json=payload).status_code == 200
     return False
 
-# --- PROCESAMIENTO MUSICAL (Lógica exacta original) ---
+# --- PROCESAMIENTO MUSICAL ---
 NOTAS_LAT = ["Do", "Do#", "Re", "Re#", "Mi", "Fa", "Fa#", "Sol", "Sol#", "La", "La#", "Si"]
 NOTAS_AMER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -92,7 +92,9 @@ def procesar_palabra(palabra, semitonos, es_linea_acordes):
     match = re.match(patron, palabra)
     if match:
         raiz, resto = match.group(1), match.group(2)
-        if raiz in ["Si", "La", "A"] and not resto and not es_linea_acordes: return palabra
+        # Filtro reforzado: si la línea es de texto y no tiene adornos de acorde, es texto.
+        if raiz in ["Si", "La", "Do", "A"] and not resto and not es_linea_acordes: 
+            return palabra
         if semitonos == 0: return f"<b>{palabra}</b>"
         dic_bemoles = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
         nota_busqueda = dic_bemoles.get(raiz, raiz)
@@ -107,7 +109,12 @@ def procesar_texto_final(texto, semitonos):
         if not linea.strip():
             lineas.append("&nbsp;")
             continue
-        es_linea_acordes = (linea.count(" ") / len(linea)) > 0.18 if len(linea) > 5 else True
+        
+        # --- MEJORA DE DETECCIÓN (Escudo de Densidad) ---
+        solo_letras = re.sub(r'[^a-zA-Z]', '', linea)
+        # Subimos el umbral a 0.45 para que frases cortas no se marquen como acordes
+        es_linea_acordes = len(solo_letras) < (len(linea) * 0.45)
+        
         partes = re.split(r"(\s+)", linea)
         procesada = "".join([p if p.strip() == "" else procesar_palabra(p, semitonos, es_linea_acordes) for p in partes])
         lineas.append(procesada.replace(" ", "&nbsp;"))
@@ -190,7 +197,6 @@ elif menu == "➕ Agregar Canción":
     
     if st.button("💾 Guardar en GitHub"):
         if t_n and l_n:
-            # LIMPIEZA DE NOMBRE DE ARCHIVO
             nombre_f = limpiar_nombre_archivo(t_n)
             contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\nReferencia: {r_n}\n\n{l_n}"
             if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
@@ -205,7 +211,6 @@ elif menu == "📂 Gestionar / Editar":
             uc = st.selectbox("Categoría", categorias, index=categorias.index(row['Categoría']) if row['Categoría'] in categorias else 0, key=f"ec_{i}")
             ul = st.text_area("Letra", row['Letra'], height=300, key=f"el_{i}")
             if st.button("Actualizar", key=f"ub_{i}"):
-                # Al actualizar también limpiamos el nombre por si cambió el título
                 nombre_f = limpiar_nombre_archivo(ut)
                 nuevo_cont = f"Título: {ut}\nAutor: {ua}\nCategoría: {uc}\nReferencia: {ur}\n\n{ul}"
                 if guardar_en_github(nombre_f, nuevo_cont): st.success("¡Actualizado!"); st.rerun()
