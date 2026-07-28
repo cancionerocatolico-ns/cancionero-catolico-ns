@@ -4,8 +4,6 @@ import requests
 import base64
 import re
 import unicodedata
-from docx import Document
-import io
 
 # --- OPTIMIZACIÓN CRON-JOB (Mantener Vivo) ---
 if "user_agent" in st.context.headers:
@@ -119,41 +117,39 @@ def procesar_texto_final(texto, semitonos):
         lineas.append(procesada.replace(" ", "&nbsp;"))
     return "<br>".join(lineas)
 
-# --- FUNCIÓN DE LECTURA MASIVA ---
-def extraer_bloques_documento(file):
-    """Parsea archivos .docx o .txt divididos por '---' o '==='."""
-    texto_completo = ""
-    if file.name.endswith(".docx"):
-        doc = Document(io.BytesIO(file.read()))
-        texto_completo = "\n".join([p.text for p in doc.paragraphs])
-    elif file.name.endswith(".txt"):
-        texto_completo = file.read().decode("utf-8")
-    
-    # Dividir por separadores habituales
-    bloques = re.split(r'\n\s*[-=]{3,}\s*\n', texto_completo)
+# --- FUNCIÓN DE LECTURA MASIVA (Nativa TXT / Varios Archivos) ---
+def extraer_bloques_documento(files):
+    """Parsea archivos .txt divididos por '---' o múltiples archivos subidos a la vez."""
     canciones_parseadas = []
+    
+    if not isinstance(files, list):
+        files = [files]
 
-    for idx, b in enumerate(bloques):
-        if not b.strip(): continue
-        lineas = [l.strip() for l in b.strip().split("\n") if l.strip()]
-        
-        titulo, autor, categoria, referencia = f"Canción {idx+1}", "Anónimo", "Varios", ""
-        lineas_letra = []
+    for file in files:
+        contenido = file.read().decode("utf-8", errors="ignore")
+        bloques = re.split(r'\n\s*[-=]{3,}\s*\n', contenido)
 
-        for l in b.strip().split("\n"):
-            if l.startswith("Título:"): titulo = l.replace("Título:", "").strip()
-            elif l.startswith("Autor:"): autor = l.replace("Autor:", "").strip()
-            elif l.startswith("Categoría:"): categoria = l.replace("Categoría:", "").strip()
-            elif l.startswith("Referencia:"): referencia = l.replace("Referencia:", "").strip()
-            else: lineas_letra.append(l)
+        for idx, b in enumerate(bloques):
+            if not b.strip(): continue
+            
+            titulo, autor, categoria, referencia = f"{file.name.replace('.txt', '')} ({idx+1})", "Anónimo", "Varios", ""
+            lineas_letra = []
 
-        canciones_parseadas.append({
-            "titulo": titulo,
-            "autor": autor,
-            "categoria": categoria,
-            "referencia": referencia,
-            "letra": "\n".join(lineas_letra).strip()
-        })
+            for l in b.strip().split("\n"):
+                if l.startswith("Título:"): titulo = l.replace("Título:", "").strip()
+                elif l.startswith("Autor:"): autor = l.replace("Autor:", "").strip()
+                elif l.startswith("Categoría:"): categoria = l.replace("Categoría:", "").strip()
+                elif l.startswith("Referencia:"): referencia = l.replace("Referencia:", "").strip()
+                else: lineas_letra.append(l)
+
+            canciones_parseadas.append({
+                "titulo": titulo,
+                "autor": autor,
+                "categoria": categoria,
+                "referencia": referencia,
+                "letra": "\n".join(lineas_letra).strip()
+            })
+            
     return canciones_parseadas
 
 # --- INTERFAZ ---
@@ -238,13 +234,13 @@ elif menu == "➕ Agregar Canción":
             if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
 
 elif menu == "📦 Carga Masiva":
-    st.header("📦 Carga Masiva desde Word (.docx) o Text (.txt)")
-    st.info("💡 **Instrucciones:** Separa cada canción con tres guiones `---` en una línea vacía. Puedes incluir `Título:`, `Autor:`, etc. Si no, podrás editarlos y asignarles la categoría abajo.")
+    st.header("📦 Carga Masiva (Archivos .txt)")
+    st.info("💡 Puedes subir **varios archivos `.txt` a la vez** o un solo archivo con múltiples canciones separadas por tres guiones `---`.")
 
-    doc_subido = st.file_uploader("Cargar documento", type=["docx", "txt"])
+    docs_subidos = st.file_uploader("Cargar archivos .txt", type=["txt"], accept_multiple_files=True)
 
-    if doc_subido:
-        canciones_detectadas = extraer_bloques_documento(doc_subido)
+    if docs_subidos:
+        canciones_detectadas = extraer_bloques_documento(docs_subidos)
         st.subheader(f"🔍 Canciones detectadas: {len(canciones_detectadas)}")
 
         canciones_a_guardar = []
