@@ -4,6 +4,8 @@ import requests
 import base64
 import re
 import unicodedata
+from docx import Document
+import io
 
 # --- OPTIMIZACIÓN CRON-JOB (Mantener Vivo) ---
 if "user_agent" in st.context.headers:
@@ -92,7 +94,6 @@ def procesar_palabra(palabra, semitonos, es_linea_acordes):
     match = re.match(patron, palabra)
     if match:
         raiz, resto = match.group(1), match.group(2)
-        # Filtro reforzado: si la línea es de texto y no tiene adornos de acorde, es texto.
         if raiz in ["Si", "La", "Do", "A"] and not resto and not es_linea_acordes: 
             return palabra
         if semitonos == 0: return f"<b>{palabra}</b>"
@@ -110,15 +111,50 @@ def procesar_texto_final(texto, semitonos):
             lineas.append("&nbsp;")
             continue
         
-        # --- MEJORA DE DETECCIÓN (Escudo de Densidad) ---
         solo_letras = re.sub(r'[^a-zA-Z]', '', linea)
-        # Subimos el umbral a 0.45 para que frases cortas no se marquen como acordes
         es_linea_acordes = len(solo_letras) < (len(linea) * 0.45)
         
         partes = re.split(r"(\s+)", linea)
         procesada = "".join([p if p.strip() == "" else procesar_palabra(p, semitonos, es_linea_acordes) for p in partes])
         lineas.append(procesada.replace(" ", "&nbsp;"))
     return "<br>".join(lineas)
+
+# --- FUNCIÓN DE LECTURA MASIVA ---
+def extraer_bloques_documento(file):
+    """Parsea archivos .docx o .txt divididos por '---' o '==='."""
+    texto_completo = ""
+    if file.name.endswith(".docx"):
+        doc = Document(io.BytesIO(file.read()))
+        texto_completo = "\n".join([p.text for p in doc.paragraphs])
+    elif file.name.endswith(".txt"):
+        texto_completo = file.read().decode("utf-8")
+    
+    # Dividir por separadores habituales
+    bloques = re.split(r'\n\s*[-=]{3,}\s*\n', texto_completo)
+    canciones_parseadas = []
+
+    for idx, b in enumerate(bloques):
+        if not b.strip(): continue
+        lineas = [l.strip() for l in b.strip().split("\n") if l.strip()]
+        
+        titulo, autor, categoria, referencia = f"Canción {idx+1}", "Anónimo", "Varios", ""
+        lineas_letra = []
+
+        for l in b.strip().split("\n"):
+            if l.startswith("Título:"): titulo = l.replace("Título:", "").strip()
+            elif l.startswith("Autor:"): autor = l.replace("Autor:", "").strip()
+            elif l.startswith("Categoría:"): categoria = l.replace("Categoría:", "").strip()
+            elif l.startswith("Referencia:"): referencia = l.replace("Referencia:", "").strip()
+            else: lineas_letra.append(l)
+
+        canciones_parseadas.append({
+            "titulo": titulo,
+            "autor": autor,
+            "categoria": categoria,
+            "referencia": referencia,
+            "letra": "\n".join(lineas_letra).strip()
+        })
+    return canciones_parseadas
 
 # --- INTERFAZ ---
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
@@ -130,7 +166,7 @@ categorias = cat_raw.split(',') if cat_raw else ["Entrada", "Piedad", "Gloria", 
 df = leer_canciones_github()
 
 st.sidebar.title("🎸 ChordMaster")
-menu = st.sidebar.selectbox("Menú:", ["🏠 Cantar / Vivo", "📋 Mi Setlist", "➕ Agregar Canción", "📂 Gestionar / Editar", "⚙️ Categorías"])
+menu = st.sidebar.selectbox("Menú:", ["🏠 Cantar / Vivo", "📋 Mi Setlist", "➕ Agregar Canción", "📦 Carga Masiva", "📂 Gestionar / Editar", "⚙️ Categorías"])
 st.sidebar.markdown("---")
 c_bg = st.sidebar.color_picker("Fondo Visor", "#FFFFFF")
 c_txt = st.sidebar.color_picker("Color Letra", "#000000")
@@ -200,6 +236,57 @@ elif menu == "➕ Agregar Canción":
             nombre_f = limpiar_nombre_archivo(t_n)
             contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\nReferencia: {r_n}\n\n{l_n}"
             if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
+
+elif menu == "📦 Carga Masiva":
+    st.header("📦 Carga Masiva desde Word (.docx) o Text (.txt)")
+    st.info("💡 **Instrucciones:** Separa cada canción con tres guiones `---` en una línea vacía. Puedes incluir `Título:`, `Autor:`, etc. Si no, podrás editarlos y asignarles la categoría abajo.")
+
+    doc_subido = st.file_uploader("Cargar documento", type=["docx", "txt"])
+
+    if doc_subido:
+        canciones_detectadas = extraer_bloques_documento(doc_subido)
+        st.subheader(f"🔍 Canciones detectadas: {len(canciones_detectadas)}")
+
+        canciones_a_guardar = []
+
+        for idx, c in enumerate(canciones_detectadas):
+            with st.expander(f"🎵 {idx+1}. {c['titulo']}", expanded=True):
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
+                    t_i = st.text_input(f"Título", c['titulo'], key=f"m_t_{idx}")
+                    a_i = st.text_input(f"Autor", c['autor'], key=f"m_a_{idx}")
+                    idx_cat = categorias.index(c['categoria']) if c['categoria'] in categorias else 0
+                    c_i = st.selectbox(f"Categoría", categorias, index=idx_cat, key=f"m_c_{idx}")
+                    r_i = st.text_input(f"Referencia", c['referencia'], key=f"m_r_{idx}")
+                    l_i = st.text_area(f"Letra / Acordes", c['letra'], height=200, key=f"m_l_{idx}")
+
+                with col2:
+                    st.write("**Vista Previa en vivo:**")
+                    st.markdown(f'<div class="visor-musical">{procesar_texto_final(l_i, 0)}</div>', unsafe_allow_html=True)
+
+                canciones_a_guardar.append({
+                    "titulo": t_i,
+                    "autor": a_i,
+                    "categoria": c_i,
+                    "referencia": r_i,
+                    "letra": l_i
+                })
+
+        st.markdown("---")
+        if st.button("🚀 Confirmar y Guardar Todas las Canciones en GitHub", type="primary"):
+            exitos = 0
+            progreso = st.progress(0)
+            for i, c in enumerate(canciones_a_guardar):
+                if c['titulo'] and c['letra']:
+                    nombre_f = limpiar_nombre_archivo(c['titulo'])
+                    contenido = f"Título: {c['titulo']}\nAutor: {c['autor']}\nCategoría: {c['categoria']}\nReferencia: {c['referencia']}\n\n{c['letra']}"
+                    if guardar_en_github(nombre_f, contenido):
+                        exitos += 1
+                progreso.progress((i + 1) / len(canciones_a_guardar))
+            
+            st.success(f"¡Se guardaron {exitos} de {len(canciones_a_guardar)} canciones correctamente!")
+            st.rerun()
 
 elif menu == "📂 Gestionar / Editar":
     st.header("📂 Editar Biblioteca")
