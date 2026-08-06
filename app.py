@@ -76,7 +76,7 @@ def eliminar_de_github(nombre_archivo):
         return requests.delete(url, headers=headers, json=payload).status_code == 200
     return False
 
-# --- PROCESAMIENTO MUSICAL ---
+# --- PROCESAMIENTO MUSICAL (INTACTO AL CÓDIGO ORIGINAL) ---
 NOTAS_LAT = ["Do", "Do#", "Re", "Re#", "Mi", "Fa", "Fa#", "Sol", "Sol#", "La", "La#", "Si"]
 NOTAS_AMER = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -105,7 +105,9 @@ def procesar_palabra(palabra, semitonos, es_linea_acordes):
 def procesar_texto_final(texto, semitonos):
     if not texto: return ""
     lineas = []
-    for linea in texto.split('\n'):
+    # Normalización de saltos de línea para evitar fallos de lectura desde TextAreas
+    texto_limpio = texto.replace('\r\n', '\n').replace('\r', '\n')
+    for linea in texto_limpio.split('\n'):
         if not linea.strip():
             lineas.append("&nbsp;")
             continue
@@ -120,9 +122,8 @@ def procesar_texto_final(texto, semitonos):
         lineas.append(procesada.replace(" ", "&nbsp;"))
     return "<br>".join(lineas)
 
-# --- FUNCIÓN AUXILIAR PARA PARSEO MASIVO ---
+# --- FUNCIÓN PARSEO MASIVO ---
 def parsear_bloque_cancion(bloque, categorias_disp):
-    """Extrae automáticamente Título, Autor, Categoría, Referencia y Letra de un texto."""
     lineas = bloque.strip().split('\n')
     titulo = ""
     autor = "Anónimo"
@@ -235,7 +236,7 @@ elif menu == "➕ Agregar Canción":
                 if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
 
     else:
-        st.info("Ingresa múltiples canciones separadas por la línea `---`. Puedes incluir los encabezados opcionales `Título:`, `Autor:`, `Categoría:` y `Referencia:`, o editarlos en el panel de procesamiento.")
+        st.info("Ingresa múltiples canciones separadas por la línea `---`. Puedes incluir los encabezados opcionales `Título:`, `Autor:`, `Categoría:` y `Referencia:`.")
         
         texto_masivo = st.text_area("Pegar bloque masivo de canciones:", height=300, 
                                     placeholder="Título: Mi Canción 1\nAutor: Juan\nCategoría: Entrada\n\nDo Sol\nLetra...\n---\nTítulo: Mi Canción 2\nAutor: Pedro\nCategoría: Ofertorio\n\nRe La\nOtra letra...")
@@ -261,8 +262,10 @@ elif menu == "➕ Agregar Canción":
                     letra = st.text_area("Letra y Acordes", value=l_def, height=180, key=f"m_let_{idx}")
                     
                     if letra:
-                        st.caption("👀 Vista Previa:")
-                        st.markdown(f'<div class="visor-musical">{procesar_texto_final(letra, 0)}</div>', unsafe_allow_html=True)
+                        st.caption("👀 Vista Previa Musical:")
+                        # Llama directamente a procesar_texto_final con semitonos=0 exactamente igual al visor principal
+                        html_preview = procesar_texto_final(letra, 0)
+                        st.markdown(f'<div class="visor-musical">{html_preview}</div>', unsafe_allow_html=True)
                     
                     canciones_procesadas.append({
                         "titulo": tit,
