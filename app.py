@@ -120,6 +120,36 @@ def procesar_texto_final(texto, semitonos):
         lineas.append(procesada.replace(" ", "&nbsp;"))
     return "<br>".join(lineas)
 
+# --- FUNCIÓN AUXILIAR PARA PARSEO MASIVO ---
+def parsear_bloque_cancion(bloque, categorias_disp):
+    """Extrae automáticamente Título, Autor, Categoría, Referencia y Letra de un texto."""
+    lineas = bloque.strip().split('\n')
+    titulo = ""
+    autor = "Anónimo"
+    categoria = categorias_disp[0] if categorias_disp else "Varios"
+    referencia = ""
+    lineas_letra = []
+    
+    i = 0
+    while i < len(lineas):
+        linea = lineas[i].strip()
+        if linea.lower().startswith("título:") or linea.lower().startswith("titulo:"):
+            titulo = linea.split(":", 1)[1].strip()
+        elif linea.lower().startswith("autor:"):
+            autor = linea.split(":", 1)[1].strip()
+        elif linea.lower().startswith("categoría:") or linea.lower().startswith("categoria:"):
+            cat_temp = linea.split(":", 1)[1].strip()
+            if cat_temp in categorias_disp:
+                categoria = cat_temp
+        elif linea.lower().startswith("referencia:"):
+            referencia = linea.split(":", 1)[1].strip()
+        else:
+            lineas_letra.append(lineas[i])
+        i += 1
+        
+    letra = "\n".join(lineas_letra).strip()
+    return titulo, autor, categoria, referencia, letra
+
 # --- INTERFAZ ---
 st.set_page_config(page_title="ChordMaster Pro", layout="wide")
 if 'setlist' not in st.session_state: st.session_state.setlist = []
@@ -183,23 +213,77 @@ if menu == "🏠 Cantar / Vivo":
         ''', unsafe_allow_html=True)
 
 elif menu == "➕ Agregar Canción":
-    st.header("➕ Nueva Canción")
-    c1, c2 = st.columns(2)
-    t_n = c1.text_input("Título")
-    a_n = c2.text_input("Autor")
-    cat_n = st.selectbox("Categoría", categorias)
-    r_n = st.text_input("Referencia (Link)")
-    l_n = st.text_area("Letra y Acordes:", height=350)
+    st.header("➕ Agregar Canciones")
+    modo = st.radio("Modo de Carga:", ["Carga Individual", "📦 Carga Masiva"], horizontal=True)
     
-    if l_n:
-        st.subheader("👀 Vista Previa")
-        st.markdown(f'<div class="visor-musical">{procesar_texto_final(l_n, 0)}</div>', unsafe_allow_html=True)
-    
-    if st.button("💾 Guardar en GitHub"):
-        if t_n and l_n:
-            nombre_f = limpiar_nombre_archivo(t_n)
-            contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\nReferencia: {r_n}\n\n{l_n}"
-            if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
+    if modo == "Carga Individual":
+        c1, c2 = st.columns(2)
+        t_n = c1.text_input("Título")
+        a_n = c2.text_input("Autor")
+        cat_n = st.selectbox("Categoría", categorias)
+        r_n = st.text_input("Referencia (Link)")
+        l_n = st.text_area("Letra y Acordes:", height=350)
+        
+        if l_n:
+            st.subheader("👀 Vista Previa")
+            st.markdown(f'<div class="visor-musical">{procesar_texto_final(l_n, 0)}</div>', unsafe_allow_html=True)
+        
+        if st.button("💾 Guardar en GitHub"):
+            if t_n and l_n:
+                nombre_f = limpiar_nombre_archivo(t_n)
+                contenido = f"Título: {t_n}\nAutor: {a_n}\nCategoría: {cat_n}\nReferencia: {r_n}\n\n{l_n}"
+                if guardar_en_github(nombre_f, contenido): st.success("¡Guardada!"); st.rerun()
+
+    else:
+        st.info("Ingresa múltiples canciones separadas por la línea `---`. Puedes incluir los encabezados opcionales `Título:`, `Autor:`, `Categoría:` y `Referencia:`, o editarlos en el panel de procesamiento.")
+        
+        texto_masivo = st.text_area("Pegar bloque masivo de canciones:", height=300, 
+                                    placeholder="Título: Mi Canción 1\nAutor: Juan\nCategoría: Entrada\n\nDo Sol\nLetra...\n---\nTítulo: Mi Canción 2\nAutor: Pedro\nCategoría: Ofertorio\n\nRe La\nOtra letra...")
+        
+        if texto_masivo.strip():
+            bloques = [b for b in texto_masivo.split("---") if b.strip()]
+            st.subheader(f"🔍 Canciones Detectadas ({len(bloques)})")
+            
+            canciones_procesadas = []
+            
+            for idx, bloque in enumerate(bloques):
+                t_def, a_def, c_def, r_def, l_def = parsear_bloque_cancion(bloque, categorias)
+                
+                with st.expander(f"🎵 Canción #{idx+1}: {t_def if t_def else 'Sin Título'}", expanded=True):
+                    col_a, col_b, col_c = st.columns([2, 2, 2])
+                    
+                    tit = col_a.text_input("Título", value=t_def, key=f"m_tit_{idx}")
+                    aut = col_b.text_input("Autor", value=a_def, key=f"m_aut_{idx}")
+                    idx_cat = categorias.index(c_def) if c_def in categorias else 0
+                    cat = col_c.selectbox("Categoría", categorias, index=idx_cat, key=f"m_cat_{idx}")
+                    
+                    ref = st.text_input("Referencia (Link)", value=r_def, key=f"m_ref_{idx}")
+                    letra = st.text_area("Letra y Acordes", value=l_def, height=180, key=f"m_let_{idx}")
+                    
+                    if letra:
+                        st.caption("👀 Vista Previa:")
+                        st.markdown(f'<div class="visor-musical">{procesar_texto_final(letra, 0)}</div>', unsafe_allow_html=True)
+                    
+                    canciones_procesadas.append({
+                        "titulo": tit,
+                        "autor": aut,
+                        "categoria": cat,
+                        "referencia": ref,
+                        "letra": letra
+                    })
+
+            if st.button("🚀 Guardar Todo en GitHub", use_container_width=True):
+                exitos = 0
+                for c in canciones_procesadas:
+                    if c["titulo"] and c["letra"]:
+                        nombre_f = limpiar_nombre_archivo(c["titulo"])
+                        contenido = f"Título: {c['titulo']}\nAutor: {c['autor']}\nCategoría: {c['categoria']}\nReferencia: {c['referencia']}\n\n{c['letra']}"
+                        if guardar_en_github(nombre_f, contenido):
+                            exitos += 1
+                
+                if exitos > 0:
+                    st.success(f"¡Se procesaron y guardaron {exitos} canciones exitosamente!")
+                    st.rerun()
 
 elif menu == "📂 Gestionar / Editar":
     st.header("📂 Editar Biblioteca")
